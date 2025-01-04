@@ -1,39 +1,74 @@
 import os
+import sys
 import time
 import typing
+import base64
 import asyncio
 import aiohttp
 import argparse
 import ipaddress
 import configparser
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-# class PayloadModifiers(object):
+from urllib.parse import urlparse, quote, unquote
+
+
+def print_something():
+    print('123123')
+
+async def do_something():
+    print('sleeping')
+    await asyncio.sleep(1)
+
+class PayloadMutators:
+    def mutator_map(self):
+        return {
+            'url': self.url_encode,
+            'b64': self.b64_encode
+        }
+
+    def mutate_all(self, payload: str, mutators:list[str]):
+        mutators = mutators.split(',')
+        for m in mutators:
+            payload =  self.mutator_map()[m](payload)
+        return payload
+
+    def url_encode(self, payload: str) -> str:
+        return quote(payload)
+
+    def b64_encode(self, payload: str) -> str:
+
+        return base64.b64encode(payload.encode('utf-8')).decode('utf-8')
 
 class EventHandler(object):
     """
     Class for containing methods which can be used to trigger groups scripts.
 
     Attributes:
+        events:         A Dictionary containing containing event names(keys) and functions
+                        to call with each event (list), I.e.  {
+                                                            'on_response': [
+                                                                            do_something, 
+                                                                            do_another_thing
+                                                                            ]
+                                                            }
 
     Sub-Classes:
-        event:  Class which stores a reference to a function and provides a simple interface 
-                for calling it.
+        event:          Class which stores a reference to a function and provides a simple 
+                        interface for calling it.
 
-                Attributes:
-                    func: function:     Stores a reference to a function.
-                    callable: bool:     Stores True if function can is callable. Otherwise it 
-                                        is False.
-                    is_async: bool:     True if function needs to called as asyncio task and 
-                                        awaited. Otherwise it is False.
+                        Attributes:
+                            func: function:     Stores a reference to a function.
+                            callable: bool:     Stores True if function is callable. Otherwise 
+                                                it is False.
+
+                            is_async: bool:     True if function needs to called as asyncio 
+                                                task and awaited. Otherwise it is False.
 
     Methods:
-        add(event_name:str, function, is_async:bool=False):     Associate a function with a specific 
-                                                                event to be called when the event is 
-                                                                triggered. 
+        add:            Associate a function with a specific event name to be called when the 
+                        event is triggered. 
 
-        call_events(event_name: str):                           Call all functions associated to the 
-                                                                event specified in its arguments.
+        call_events:    Call all functions associated to the event specified in its arguments.
 
     """
     events = {
@@ -46,8 +81,21 @@ class EventHandler(object):
         'on_err': [],
     }
 
-    class event(object):
+    class event:
         def __init__(self, func: object=None, is_async:bool=False):
+            """
+            This is a subclass of the event Handler. It is meant to hold a reference to a function
+            and provide a simple interface for calling it, asyncronsously or not, from within the 
+            call_events method. 
+            
+            Args:
+                func:       A function.
+                is_async:   Boolean specifying if function is asynchronous or not. If it is, it can 
+                            be called and awaited as an asyncio task.
+            Methods: 
+                call:       Check if function is callable and asynchronous or not using it's is_async
+                            attribute and then call using the appropriate methods.
+            """
             if callable(func):
                 self.func = func
                 self.is_async = is_async
@@ -56,21 +104,23 @@ class EventHandler(object):
                 self.callable = False
 
         async def call(self):
-            if self.is_async:
-                await asyncio.create_task(self.func())
-            else:
-                self.func()
+            if self.callable:
+                if self.is_async:
+                    await asyncio.create_task(self.func())
+                else:
+                    self.func()
 
         def __repr__(self):
             return f"<Event: {self.func.__name__}>"
 
     def add(self, event_name:str, function, is_async:bool=False):
-        self.events[event_name].append(event(function, is_async))
+        self.events[event_name].append(self.event(function, is_async))
  
-    def call_events(self, event_name: str):
-        [e.call() for e in self.events[event_name]]
+    async def call_events(self, event_name: str):
+        for e in self.events[event_name]:
+            await e.call()
 
-class Target(object):
+class Target:
     """
     Class for containing data and methods regarding the target that is accessible to worker processses.
 
@@ -79,8 +129,8 @@ class Target(object):
         wait_time: float -> Amount of time to wait in between requests to target.
 
     Attributes:
-        r_timestamp: int: A unix timestamp of last request sent to target.
-        lock: object:   Asyncio lock that should be aquired before modifying any attibutes 
+        r_timestamp:    A unix timestamp of last request sent to target.
+        lock:           Asyncio lock that should be aquired before modifying any attibutes 
                         from within a worker process.
 
     Methods:
@@ -122,7 +172,7 @@ class Target(object):
             return False
         return True
 
-class Dirpy(object):
+class Dirpy:
     def __init__(self,args):
         self. args = args
         self.sem = asyncio.Semaphore(args.workers)
@@ -132,11 +182,11 @@ class Dirpy(object):
     def load_list(self, path:str) -> list[str]:
         if not os.path.exists(path):
             print("File path does not exist. Exiting...")
-            exit()
+            sys.exit()
         with open(path, 'r', encoding='utf-8') as f:
             return [l.strip() for l in f.readlines() if not l.startswith('#')]
 
-    async def run(self, queue = asyncio.Queue()):
+    async def run(self):
         loop = asyncio.get_event_loop()
         target = Target(self.args)
 
@@ -145,9 +195,10 @@ class Dirpy(object):
         tasks = []
 
         events = EventHandler()
-
+        events.add('before_request', print_something)
+        events.add('on_response', do_something, is_async=True)
         for w in range(self.args.workers):
-            task = asyncio.create_task(self.request_worker(target, events))
+            task = asyncio.create_task(self.session_handler(target, events))
 
             tasks.append(task)
 
@@ -155,32 +206,42 @@ class Dirpy(object):
         # for s in self.sessions:
         #     await s.close()
 
-    async def request_worker(self, target: object, event_handler: object):
+    async def session_handler(self, target: object, event_handler: object):
         async with aiohttp.ClientSession() as session:
+            err = False
             while self.payload_queue.qsize() > 0:
                 while not target.ready():
                     await asyncio.sleep(target.wait_time / self.args.workers)
                 
                 try:
-                    async with target.lock:
-                        target.reset_timer()
+                    if target.wait_time > 0:
+                        async with target.lock:
+                            target.reset_timer()
 
                     payload = await self.payload_queue.get()
+
+                    payload = PayloadMutators().mutate_all(payload, self.args.mutate)
+        
                     url = os.path.join(target.address, payload)
-
+                    await event_handler.call_events('before_request')
                     async with session.get(url) as response:
+                        await event_handler.call_events('on_response')
                         if response.status == 200:
-                            print(response)
-
+                            await event_handler.call_events('on_success')
+                        else:
+                            await event_handler.call_events('on_failure')
                 except aiohttp.client_exceptions.ServerDisconnectedError as e:
                     print(e)
+                    err = True
                 except aiohttp.client_exceptions.ClientConnectorError as e:
                     print(e)
-
+                    err = True
                 except ValueError as e:
                     print(e)
-
+                    err = True
                 finally:
+                    if err:
+                        await event_handler.call_events('on_err')
                     self.payload_queue.task_done()
     
 
@@ -195,6 +256,7 @@ async def main():
     parser.add_argument("-w", "--wordlist", type=str, help="Path to wordlist to use")
     parser.add_argument("-pr", "--prefix", type=str )
     parser.add_argument("--wait", type=float, default=0, help="Number of concurrent sessions to use.")
+    parser.add_argument("--mutate", type=str, default='', help="apply mutations to payload")
     args = parser.parse_args()
 
     dirpy = Dirpy(args)
