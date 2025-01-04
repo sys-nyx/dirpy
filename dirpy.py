@@ -4,9 +4,10 @@ import typing
 import asyncio
 import aiohttp
 import argparse
+import ipaddress
 import configparser
 from bs4 import BeautifulSoup
-
+from urllib.parse import urlparse
 # class PayloadModifiers(object):
 
 class EventHandler(object):
@@ -44,16 +45,49 @@ class EventHandler(object):
         [e.call() for e in self.events[event_name]]
 
 class Target(object):
+    """
+    Class for containing data regarding the target that is accessible to worker processses.
+
+    Args: 
+        address: str -> Ip address or url for target.
+        wait_time: float -> Amount of time to wait in between requests to target.
+
+    Attributes:
+        r_timestamp: int: A unix timestamp of last request sent to target.
+        lock: object: Asyncio lock that should be aquired before modifying any attibutes from within a worker process.
+
+    Methods:
+        reset_timer: Reset the overwrite r_timestamp with a new timestamp.
+        ready -> bool: Determine if time since last request is greater than the value stored in wait_time attribute.
+        is_valid_ip -> bool: Determine if ip address provided is a valid ipv4 or ipv6 address.
+        is_valid_url -> bool: Determine if url provided is a valid.
+    """
     def __init__(self, args):
         self.address = args.address
         self.r_timestamp = time.time()
         self.wait_time = args.wait
         self.lock = asyncio.Lock()
+        
     def reset_timer(self):
         self.r_timestamp = time.time()
 
     def ready(self) -> bool:
         return (time.time() - self.r_timestamp) >= self.wait_time
+
+
+    def is_valid_url(self, url: str) -> bool:
+        try: 
+            url_parser = urlparse.parser(url, strict_parsing=True)
+        except ValueError:
+            return False
+        return True
+
+    def is_valid_ip(self, ip: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return True
 
 class Dirpy(object):
     def __init__(self,args):
@@ -98,20 +132,23 @@ class Dirpy(object):
 
                     payload = await self.payload_queue.get()
                     url = os.path.join(target.address, payload)
-                    print(url)
+
                     async with session.get(url) as response:
                         if response.status == 200:
                             print(response)
 
-                except aiohttp.client_exceptions.ServerDisconnectedError:
-                    
-                    pass
+                except aiohttp.client_exceptions.ServerDisconnectedError as e:
+                    print(e)
+                except aiohttp.client_exceptions.ClientConnectorError as e:
+                    print(e)
+
                 except ValueError as e:
                     print(e)
 
                 finally:
                     self.payload_queue.task_done()
     
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scan_type", type=str, help='Type of scan to run {fuzz, crawl, auth, subdomain, vhost}')
