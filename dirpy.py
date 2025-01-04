@@ -11,12 +11,38 @@ from urllib.parse import urlparse
 # class PayloadModifiers(object):
 
 class EventHandler(object):
+    """
+    Class for containing methods which can be used to trigger groups scripts.
+
+    Attributes:
+
+    Sub-Classes:
+        event:  Class which stores a reference to a function and provides a simple interface 
+                for calling it.
+
+                Attributes:
+                    func: function:     Stores a reference to a function.
+                    callable: bool:     Stores True if function can is callable. Otherwise it 
+                                        is False.
+                    is_async: bool:     True if function needs to called as asyncio task and 
+                                        awaited. Otherwise it is False.
+
+    Methods:
+        add(event_name:str, function, is_async:bool=False):     Associate a function with a specific 
+                                                                event to be called when the event is 
+                                                                triggered. 
+
+        call_events(event_name: str):                           Call all functions associated to the 
+                                                                event specified in its arguments.
+
+    """
     events = {
         'before_request': [],
         'mutate_paload': [],
         'on_response': [],
         'on_success': [],
         'on_failure': [],
+        'on_timeout': [],
         'on_err': [],
     }
 
@@ -46,7 +72,7 @@ class EventHandler(object):
 
 class Target(object):
     """
-    Class for containing data regarding the target that is accessible to worker processses.
+    Class for containing data and methods regarding the target that is accessible to worker processses.
 
     Args: 
         address: str -> Ip address or url for target.
@@ -54,11 +80,18 @@ class Target(object):
 
     Attributes:
         r_timestamp: int: A unix timestamp of last request sent to target.
-        lock: object: Asyncio lock that should be aquired before modifying any attibutes from within a worker process.
+        lock: object:   Asyncio lock that should be aquired before modifying any attibutes 
+                        from within a worker process.
 
     Methods:
-        reset_timer: Reset the overwrite r_timestamp with a new timestamp.
-        ready -> bool: Determine if time since last request is greater than the value stored in wait_time attribute.
+        reset_timer:    Overwrite r_timestamp with a new timestamp. Should be called along 
+                        with every new request made to the target to insure timeoouts work
+                        properly.
+    
+        ready -> bool:  Determine if time since last request is greater than the value 
+                        stored in wait_time attribute. Used to determine if target is on
+                        timeout or not.
+    
         is_valid_ip -> bool: Determine if ip address provided is a valid ipv4 or ipv6 address.
         is_valid_url -> bool: Determine if url provided is a valid.
     """
@@ -111,8 +144,10 @@ class Dirpy(object):
         
         tasks = []
 
+        events = EventHandler()
+
         for w in range(self.args.workers):
-            task = asyncio.create_task(self.request_worker(target))
+            task = asyncio.create_task(self.request_worker(target, events))
 
             tasks.append(task)
 
@@ -120,7 +155,7 @@ class Dirpy(object):
         # for s in self.sessions:
         #     await s.close()
 
-    async def request_worker(self, target: object):
+    async def request_worker(self, target: object, event_handler: object):
         async with aiohttp.ClientSession() as session:
             while self.payload_queue.qsize() > 0:
                 while not target.ready():
