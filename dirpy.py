@@ -12,11 +12,11 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, quote, unquote
 
 
-def print_something():
-    print('123123')
+def print_something(*args, **kwargs):
+    print(*args)
 
-async def do_something():
-    print('sleeping')
+async def do_something(*args):
+    # print('sleeping')
     await asyncio.sleep(1)
 
 class PayloadMutators:
@@ -27,9 +27,11 @@ class PayloadMutators:
         }
 
     def mutate_all(self, payload: str, mutators:list[str]):
-        mutators = mutators.split(',')
-        for m in mutators:
-            payload =  self.mutator_map()[m](payload)
+        if mutators:
+            mutators = mutators.split(',')
+        
+            for m in mutators:
+                payload =  self.mutator_map()[m](payload)
         return payload
 
     def url_encode(self, payload: str) -> str:
@@ -103,12 +105,12 @@ class EventHandler(object):
             else:
                 self.callable = False
 
-        async def call(self):
+        async def call(self, *args, **kwargs):
             if self.callable:
                 if self.is_async:
-                    await asyncio.create_task(self.func())
+                    await asyncio.create_task(self.func(*args,**kwargs))
                 else:
-                    self.func()
+                    self.func(args, kwargs)
 
         def __repr__(self):
             return f"<Event: {self.func.__name__}>"
@@ -116,9 +118,9 @@ class EventHandler(object):
     def add(self, event_name:str, function, is_async:bool=False):
         self.events[event_name].append(self.event(function, is_async))
  
-    async def call_events(self, event_name: str):
+    async def call_events(self, event_name: str, *args):
         for e in self.events[event_name]:
-            await e.call()
+            await e.call(args)
 
 class Target:
     """
@@ -195,8 +197,8 @@ class Dirpy:
         tasks = []
 
         events = EventHandler()
-        events.add('before_request', print_something)
         events.add('on_response', do_something, is_async=True)
+        events.add('on_response', print_something)
         for w in range(self.args.workers):
             task = asyncio.create_task(self.session_handler(target, events))
 
@@ -223,13 +225,13 @@ class Dirpy:
                     payload = PayloadMutators().mutate_all(payload, self.args.mutate)
         
                     url = os.path.join(target.address, payload)
-                    await event_handler.call_events('before_request')
+                    await event_handler.call_events('before_request', payload)
                     async with session.get(url) as response:
-                        await event_handler.call_events('on_response')
+                        await event_handler.call_events('on_response', response)
                         if response.status == 200:
-                            await event_handler.call_events('on_success')
+                            await event_handler.call_events('on_success', response)
                         else:
-                            await event_handler.call_events('on_failure')
+                            await event_handler.call_events('on_failure', response)
                 except aiohttp.client_exceptions.ServerDisconnectedError as e:
                     print(e)
                     err = True
@@ -241,7 +243,7 @@ class Dirpy:
                     err = True
                 finally:
                     if err:
-                        await event_handler.call_events('on_err')
+                        await event_handler.call_events('on_err', response)
                     self.payload_queue.task_done()
     
 
