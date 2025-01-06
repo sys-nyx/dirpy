@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import shutil
 import typing
 import base64
 import asyncio
@@ -11,9 +12,31 @@ import configparser
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, quote, unquote
 
+def show_logo():
+    logo=r"""
+              .=-.-.               _ __                   
+  _,..---._  /==/_ /.-.,.---.   .-`.' ,`.  ,--.-.  .-,--. 
+/==/,   -  \|==|, |/==/  `   \ /==/, -   \/==/- / /=/_ /  
+|==|   _   _\==|  |==|-, .=., |==| _ .=. |\==\, \/=/. /   
+|==|  .=.   |==|- |==|   '='  /==| , '=',| \==\  \/ -/    
+|==|,|   | -|==| ,|==|- ,   .'|==|-  '..'   |==|  ,_/     
+|==|  '='   /==|- |==|_  . ,'.|==|,  |      \==\-, /      
+|==|-,   _`//==/. /==/  /\ ,  )==/ - |      /==/._/       
+`-.`.____.' `--`-``--`-`--`--'`--`---'      `--`-`        
+"""
+    for c in logo:
+        print(c, end="")
 
-def print_something(response, dirpy):
-    print(response)
+def print_results(response, dirpy):
+    """
+    Calculate width of terminal and then print a string containing the url and status of the 
+    response passed into it.
+    """
+    columns, lines = shutil.get_terminal_size()
+    r_str = str(response.url)
+    r_str = r_str + ('.' * (columns - (len(str(response.url)) + len(str(response.status)))))
+    r_str = r_str + str(response.status)
+    print(r_str)
 
 async def do_something(*args, **kwargs):
     # print('sleeping')
@@ -120,6 +143,16 @@ class EventHandler(object):
             return f"<Event: {self.func.__name__}>"
 
     def add(self, event_name:str, function, is_async:bool=False):
+        """
+        Takes a function and adds it to the event handler to be called when the specified event 
+        is triggered.
+
+        Args: 
+            event_name:     Name of event to register function with.
+            function:       A refernce to the function to be ran.
+            is_async:       Boolean representing whether or not the function is asynchronous or 
+                            not. Default is false.
+        """
         self.events[event_name].append(self.event(function, is_async))
  
     async def call_events(self, event_name: str, *args, **kwargs):
@@ -131,26 +164,33 @@ class Target:
     Class for containing data and methods regarding the target that is accessible to worker processses.
 
     Args: 
-        address: str -> Ip address or url for target.
-        wait_time: float -> Amount of time to wait in between requests to target.
+
+        address:        Ip address or url for target.
+
+        wait_time:      Amount of time to wait in between requests to target.
 
     Attributes:
+
         r_timestamp:    A unix timestamp of last request sent to target.
+
         lock:           Asyncio lock that should be aquired before modifying any attibutes 
                         from within a worker process.
 
     Methods:
+
         reset_timer:    Overwrite r_timestamp with a new timestamp. Should be called along 
                         with every new request made to the target to insure timeoouts work
                         properly.
     
-        ready -> bool:  Determine if time since last request is greater than the value 
+        ready:          Determine if time since last request is greater than the value 
                         stored in wait_time attribute. Used to determine if target is on
                         timeout or not.
     
-        is_valid_ip -> bool: Determine if ip address provided is a valid ipv4 or ipv6 address.
-        is_valid_url -> bool: Determine if url provided is a valid.
+        is_valid_ip:    Determine if ip address provided is a valid ipv4 or ipv6 address.
+
+        is_valid_url:   Determine if url provided is a valid.
     """
+
     def __init__(self, args):
         self.address = args.address
         self.r_timestamp = time.time()
@@ -202,7 +242,7 @@ class Dirpy:
 
         events = EventHandler()
         events.add('on_response', do_something, is_async=True)
-        events.add('on_response', print_something)
+        events.add('on_response', print_results)
         for w in range(self.args.workers):
             task = asyncio.create_task(self.session_handler(target, events))
 
@@ -264,7 +304,7 @@ async def main():
     parser.add_argument("--wait", type=float, default=0, help="Number of concurrent sessions to use.")
     parser.add_argument("--mutate", type=str, default='', help="apply mutations to payload")
     args = parser.parse_args()
-
+    show_logo()
     dirpy = Dirpy(args)
 
     await dirpy.run()
