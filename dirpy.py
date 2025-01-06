@@ -12,10 +12,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, quote, unquote
 
 
-def print_something(*args, **kwargs):
-    print(*args)
+def print_something(response, dirpy):
+    print(response)
 
-async def do_something(*args):
+async def do_something(*args, **kwargs):
     # print('sleeping')
     await asyncio.sleep(1)
 
@@ -106,11 +106,15 @@ class EventHandler(object):
                 self.callable = False
 
         async def call(self, *args, **kwargs):
+            """
+            Call a function stored in the parent class. Function is asynchronous execute it as 
+            asyncio task.
+            """
             if self.callable:
                 if self.is_async:
-                    await asyncio.create_task(self.func(*args,**kwargs))
+                    await asyncio.create_task(self.func(*args, **kwargs))
                 else:
-                    self.func(args, kwargs)
+                    self.func(*args, **kwargs)
 
         def __repr__(self):
             return f"<Event: {self.func.__name__}>"
@@ -118,9 +122,9 @@ class EventHandler(object):
     def add(self, event_name:str, function, is_async:bool=False):
         self.events[event_name].append(self.event(function, is_async))
  
-    async def call_events(self, event_name: str, *args):
+    async def call_events(self, event_name: str, *args, **kwargs):
         for e in self.events[event_name]:
-            await e.call(args)
+            await e.call(*args, **kwargs)
 
 class Target:
     """
@@ -227,11 +231,11 @@ class Dirpy:
                     url = os.path.join(target.address, payload)
                     await event_handler.call_events('before_request', payload)
                     async with session.get(url) as response:
-                        await event_handler.call_events('on_response', response)
+                        await event_handler.call_events('on_response', response, self)
                         if response.status == 200:
-                            await event_handler.call_events('on_success', response)
+                            await event_handler.call_events('on_success', response, self)
                         else:
-                            await event_handler.call_events('on_failure', response)
+                            await event_handler.call_events('on_failure', response, self)
                 except aiohttp.client_exceptions.ServerDisconnectedError as e:
                     print(e)
                     err = True
