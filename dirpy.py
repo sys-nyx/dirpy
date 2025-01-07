@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import time
 import shutil
 import typing
@@ -205,11 +206,12 @@ class Target:
         self.wait_time = args.wait
         self.lock = asyncio.Lock()
         self.req_count = 0
+
     def reset_timer(self):
         self.r_timestamp = time.time()
+
     def ready(self) -> bool:
         return (time.time() - self.r_timestamp) >= self.wait_time
-
 
     def is_valid_url(self, url: str) -> bool:
         try: 
@@ -231,7 +233,7 @@ class Dirpy:
         self.sem = asyncio.Semaphore(args.workers)
         self.payload_queue = asyncio.Queue()
         self.sessions = []
-        
+        self.event_handler = EventHandler()
     def load_list(self, path:str) -> list[str]:
         if not os.path.exists(path):
             print("File path does not exist. Exiting...")
@@ -247,67 +249,93 @@ class Dirpy:
         
         tasks = []
 
-        events = EventHandler()
-        events.add('on_response', print_results)
-        for w in range(self.args.workers):
-            task = asyncio.create_task(self.session_handler(target, events))
+        self.event_handler.add('on_response', print_results)
+        for w in range(self.args.sessions):
+            task = asyncio.create_task(self.session_handler(target))
 
             tasks.append(task)
 
         await asyncio.gather(*tasks)
 
-    async def session_handler(self, target: object, event_handler: object):
-        async with aiohttp.ClientSession() as session:
-            err = False
-            while self.payload_queue.qsize() > 0:
-                while not target.ready():
-                    await asyncio.sleep(target.wait_time / self.args.workers)
-                
-                try:
-                    if target.wait_time > 0 or target.wait_time == 0:
-                        async with target.lock:
-                            target.reset_timer()
-                            target.req_count += 1
-                            if target.req_count % 100 == 0:
-                                print(target.req_count)
-                    payload = await self.payload_queue.get()
-                    payload = PayloadMutators().mutate_all(payload, self.args.mutate)
+    async def request_worker(self, target, session):
+        err = False
+        while self.payload_queue.qsize() > 0:
+            while not target.ready():
+                await asyncio.sleep(target.wait_time / self.args.workers)
+            
+            try:
+                if target.wait_time > 0 or target.wait_time == 0:
+                    async with target.lock:
+                        target.reset_timer()
+                        target.req_count += 1
+                        if target.req_count % 100 == 0:
+                            print(target.req_count)
+                payload = await self.payload_queue.get()
+                payload = PayloadMutators().mutate_all(payload, self.args.mutate)
         
-                    url = os.path.join(target.address, payload)
-                    await event_handler.call_events('before_request', payload)
-                    async with session.get(url) as response:
-                        await event_handler.call_events('on_response', response, self)
-                        if response.status == 200:
-                            await event_handler.call_events('on_success', response, self)
-                        else:
-                            await event_handler.call_events('on_failure', response, self)
-                except aiohttp.client_exceptions.ServerDisconnectedError as e:
-                    print(e)
-                    err = True
-                except aiohttp.client_exceptions.ClientConnectorError as e:
-                    print(e)
-                    err = True
-                except ValueError as e:
-                    print(e)
-                    err = True
-                finally:
-                    if err:
-                        await event_handler.call_events('on_err', response)
-                    self.payload_queue.task_done()
-    
+                url = os.path.join(target.address, payload)
+                await self.event_handler.call_events('before_request', payload)
+                async with session.request(self.args.method, url) as response:
+                    await self.event_handler.call_events('on_response', response, self)
+                    if response.status == 200:
+                        await self.event_handler.call_events('on_success', response, self)
+                    else:
+                        await self.event_handler.call_events('on_failure', response, self)
+
+            except aiohttp.client_exceptions.ServerDisconnectedError as e:
+                print(e)
+                err = True
+            except aiohttp.client_exceptions.ClientConnectorError as e:
+                print(e)
+                err = True
+            except ValueError as e:
+                print(e)
+                err = True
+            finally:
+                if err:
+                    await self.event_handler.call_events('on_err', response)
+                self.payload_queue.task_done()
+
+
+    async def session_handler(self, target: object):
+        data = {}
+        headers = {}
+        if self.args.data:
+            data = get_args_data(self.args.data)
+        if self.args.headers:
+            headers = get_args_headers(self.args.headers)
+        
+        async with aiohttp.ClientSession(headers=headers) as session:
+            tasks = []
+
+            for w in range(math.floor(self.args.workers / self.args.sessions)):
+                task = asyncio.create_task(self.request_worker(target, session))
+                tasks.append(task)
+
+            await asyncio.gather(*tasks)
+
+def get_args_data(args_str: str) -> dict:
+    return
+def get_args_headers(args_str: str) -> dict:
+    return
 
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scan_type", type=str, help='Type of scan to run {fuzz, crawl, auth, subdomain, vhost}')
     parser.add_argument("address", type=str, help='domain or ip address to scan, i.e. https://example.com')
-    parser.add_argument("--persist", type=bool, help='Maintain progress on scan')
-    parser.add_argument("-t", "--workers", type=int, default=8, help='Max number of simultaneous requests to make')
-    parser.add_argument("-c", "--cookies", type=str, help='Cookies to inlcude with requests')
+    parser.add_argument("--persist", type=bool, help='Maintain progress on scan.')
+    parser.add_argument("-t", "--workers", type=int, default=8, help='Max number of simultaneous request loops to run.')
+    parser.add_argument("-c", "--cookies", type=str, help='Cookies to include with requests.')
     parser.add_argument("-s", "--sessions", type=int, default=1, help="Number of concurrent sessions to use.")
-    parser.add_argument("-w", "--wordlist", type=str, help="Path to wordlist to use")
-    parser.add_argument("-pr", "--prefix", type=str )
+    parser.add_argument("-w", "--wordlist", type=str, help="Path to wordlist to use.")
+    parser.add_argument("-pr", "--prefix", type=str, help="Append a string to the begginning of every payload.")
+    parser.add_argument("-su", "--suffix", type=str, help="Append a string to the end of every payload. If an extension is also used, the extension is added last.")
     parser.add_argument("--wait", type=float, default=0, help="Number of concurrent sessions to use.")
-    parser.add_argument("--mutate", type=str, default='', help="apply mutations to payload")
+    parser.add_argument("--mutate", type=str, default='', help="apply mutations to payload.")
+    parser.add_argument("-H", "--headers", type=str, help="Add headers to each request to be made. Seperate each header to add with a comma. I.e. 'Host: example.com'")
+    parser.add_argument("-D", "--data", type=str, help="Add custom data to each body.")
+    parser.add_argument("-X", "--method", default="GET", type=str, help="Request method to use {GET, POST, HEAD, PUT, DELETE, OPTIONS}")
+    parser.add_argument("-ua", "--user-agent", type=str, help="Specify a custom user agent to use.")
     args = parser.parse_args()
     show_logo()
     dirpy = Dirpy(args)
