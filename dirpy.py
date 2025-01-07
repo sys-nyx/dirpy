@@ -156,6 +156,14 @@ class EventHandler(object):
         self.events[event_name].append(self.event(function, is_async))
  
     async def call_events(self, event_name: str, *args, **kwargs):
+        """
+        Call all functions associated to a given event name within the self.events dictionary.
+
+        Args:
+            event_name:     String name of the event being triggered.
+            args:           Packed positional arguments to be passed along to the functions being called.
+            kwargs:         Packed keyword arguments to be passed along to the functions being called.
+        """
         for e in self.events[event_name]:
             await e.call(*args, **kwargs)
 
@@ -171,7 +179,7 @@ class Target:
 
     Attributes:
 
-        r_timestamp:    A unix timestamp of last request sent to target.
+        r_timestamp:    A unix timestamp of the last request sent to target.
 
         lock:           Asyncio lock that should be aquired before modifying any attibutes 
                         from within a worker process.
@@ -196,10 +204,9 @@ class Target:
         self.r_timestamp = time.time()
         self.wait_time = args.wait
         self.lock = asyncio.Lock()
-        
+        self.req_count = 0
     def reset_timer(self):
         self.r_timestamp = time.time()
-
     def ready(self) -> bool:
         return (time.time() - self.r_timestamp) >= self.wait_time
 
@@ -224,7 +231,7 @@ class Dirpy:
         self.sem = asyncio.Semaphore(args.workers)
         self.payload_queue = asyncio.Queue()
         self.sessions = []
-
+        
     def load_list(self, path:str) -> list[str]:
         if not os.path.exists(path):
             print("File path does not exist. Exiting...")
@@ -241,7 +248,6 @@ class Dirpy:
         tasks = []
 
         events = EventHandler()
-        events.add('on_response', do_something, is_async=True)
         events.add('on_response', print_results)
         for w in range(self.args.workers):
             task = asyncio.create_task(self.session_handler(target, events))
@@ -249,8 +255,6 @@ class Dirpy:
             tasks.append(task)
 
         await asyncio.gather(*tasks)
-        # for s in self.sessions:
-        #     await s.close()
 
     async def session_handler(self, target: object, event_handler: object):
         async with aiohttp.ClientSession() as session:
@@ -260,12 +264,13 @@ class Dirpy:
                     await asyncio.sleep(target.wait_time / self.args.workers)
                 
                 try:
-                    if target.wait_time > 0:
+                    if target.wait_time > 0 or target.wait_time == 0:
                         async with target.lock:
                             target.reset_timer()
-
+                            target.req_count += 1
+                            if target.req_count % 100 == 0:
+                                print(target.req_count)
                     payload = await self.payload_queue.get()
-
                     payload = PayloadMutators().mutate_all(payload, self.args.mutate)
         
                     url = os.path.join(target.address, payload)
