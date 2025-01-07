@@ -44,6 +44,17 @@ async def do_something(*args, **kwargs):
     await asyncio.sleep(1)
 
 class PayloadMutators:
+    """
+    Class for providing simple methods for applying various forms of text encoding and transformations.
+
+    Methods:
+        mutator_map:    Return a dictionary containing function references(value) and their 
+                        names(key).
+
+        mutate_all:     Extract names from a comma seperated list and apply each associated 
+                        function to a string
+
+    """
     def mutator_map(self):
         return {
             'url': self.url_encode,
@@ -59,10 +70,15 @@ class PayloadMutators:
         return payload
 
     def url_encode(self, payload: str) -> str:
+        """
+        Url encode a string and return it.
+        """
         return quote(payload)
 
     def b64_encode(self, payload: str) -> str:
-
+        """
+        Base64 encode a string and return it.
+        """
         return base64.b64encode(payload.encode('utf-8')).decode('utf-8')
 
 class EventHandler(object):
