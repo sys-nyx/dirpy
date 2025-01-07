@@ -304,7 +304,11 @@ class Dirpy:
             data = get_args_data(self.args.data)
         if self.args.headers:
             headers = get_args_headers(self.args.headers)
-        
+        if self.args.user_agent:
+            if self.args.user_agent == "rand":
+                headers['User-Agent'] = get_rand_ua()
+            else: 
+                headers['User-Agent'] = self.args.user_agent
         async with aiohttp.ClientSession(headers=headers) as session:
             tasks = []
 
