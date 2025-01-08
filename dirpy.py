@@ -224,12 +224,23 @@ class Target:
         self.req_count = 0
 
     def reset_timer(self):
+        """
+        Set self.r_timestamp to a current timestamp.
+        """
         self.r_timestamp = time.time()
 
     def ready(self) -> bool:
+        """
+        Determine if time since last request is greater than the value stored in wait_time 
+        attribute. Used to determine if target is on timeout or not.
+        """
         return (time.time() - self.r_timestamp) >= self.wait_time
 
     def is_valid_url(self, url: str) -> bool:
+        """
+        Determine if a url is valid by trying to create a url object with the urlib library. If 
+        it fails a value of False will be returned.
+        """
         try: 
             url_parser = urlparse.parser(url, strict_parsing=True)
         except ValueError:
@@ -237,6 +248,10 @@ class Target:
         return True
 
     def is_valid_ip(self, ip: str) -> bool:
+        """
+        Determine if an ip address is valid by attempting to create a ipaddress object with it. If
+        it fails, a False value will be returned.
+        """
         try:
             ip = ipaddress.ip_address(ip)
         except ValueError:
