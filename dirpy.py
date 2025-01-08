@@ -275,14 +275,23 @@ class Dirpy:
     async def run(self):
         loop = asyncio.get_event_loop()
         target = Target(self.args)
-
+        proxy = None
+        proxies = None
         any(map(self.payload_queue.put_nowait, self.load_list(self.args.wordlist)))
         
         tasks = []
 
         self.event_handler.add('on_response', print_results)
+
+        if self.args.session_proxies:
+            proxies = load_list(self.args.session_proxies)
+
+
         for w in range(self.args.sessions):
-            task = asyncio.create_task(self.session_handler(target))
+            if proxies:
+                proxy = proxies[w]
+    
+            task = asyncio.create_task(self.session_handler(target, proxy))
 
             tasks.append(task)
 
@@ -328,7 +337,16 @@ class Dirpy:
                 self.payload_queue.task_done()
 
 
-    async def session_handler(self, target: object):
+    async def session_handler(self, target: object, proxy: str):
+        """
+        Create a session, which iwll in turn spawn worker process. Each worker process utilizes 
+        session attriubutes, such as user-agents, that are created within this function.
+
+        Args:
+            target:     Target object containing a valid url or ip address.
+
+            proxy:      Set a proxy as the sessions default.
+        """
         data = {}
         headers = {}
         if self.args.data:
@@ -340,7 +358,8 @@ class Dirpy:
                 headers['User-Agent'] = get_rand_ua()
             else: 
                 headers['User-Agent'] = self.args.user_agent
-        async with aiohttp.ClientSession(headers=headers) as session:
+
+        async with aiohttp.ClientSession(headers=headers, proxy=proxy) as session:
             tasks = []
 
             for w in range(math.floor(self.args.workers / self.args.sessions)):
@@ -371,6 +390,7 @@ async def main():
     parser.add_argument("-D", "--data", type=str, help="Add custom data to each body.")
     parser.add_argument("-X", "--method", default="GET", type=str, help="Request method to use {GET, POST, HEAD, PUT, DELETE, OPTIONS}")
     parser.add_argument("-ua", "--user-agent", type=str, help="Specify a custom user agent to use.")
+    parser.add_argument("-sp", "--session-proxies", type=str, help="Path a text file containing a list of proxies to use(One per generated session)")
     args = parser.parse_args()
     show_logo()
     dirpy = Dirpy(args)
