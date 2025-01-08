@@ -15,18 +15,26 @@ from urllib.parse import urlparse, quote, unquote
 
 def show_logo():
     logo=r"""
-              .=-.-.               _ __                   
-  _,..---._  /==/_ /.-.,.---.   .-`.' ,`.  ,--.-.  .-,--. 
-/==/,   -  \|==|, |/==/  `   \ /==/, -   \/==/- / /=/_ /  
-|==|   _   _\==|  |==|-, .=., |==| _ .=. |\==\, \/=/. /   
-|==|  .=.   |==|- |==|   '='  /==| , '=',| \==\  \/ -/    
-|==|,|   | -|==| ,|==|- ,   .'|==|-  '..'   |==|  ,_/     
-|==|  '='   /==|- |==|_  . ,'.|==|,  |      \==\-, /      
-|==|-,   _`//==/. /==/  /\ ,  )==/ - |      /==/._/       
-`-.`.____.' `--`-``--`-`--`--'`--`---'      `--`-`        
+                                                .=-.-.               _ __                                                     
+        =========================== _,..---._  /==/_ /.-.,.---.   .-`.' ,`.  ,--.-.  .-,--. =================================
+       ========================== /==/,   -  \|==|, |/==/  `   \ /==/, -   \/==/- / /=/_ / =================================
+      =========================== |==|   _   _\==|  |==|-, .=., |==| _ .=. |\==\, \/=/. / =================================
+     ============================ |==|  .=.   |==|- |==|   '='  /==| , '=',| \==\  \/ -/ =================================
+    ============================= |==|,|   | -|==| ,|==|- ,   .'|==|-  '..'   |==|  ,_/ =================================
+   ============================== |==|  '='   /==|- |==|_  . ,'.|==|,  |      \==\-, / =================================
+  =============================== |==|-,   _`//==/. /==/  /\ ,  )==/ - |      /==/._/ =================================
+ ================================ `-.`.____.' `--`-``--`-`--`--'`--`---'      `--`-` =================================
+ 
 """
+    i = 31
     for c in logo:
-        print(c, end="")
+        
+        print(f"{c}", end="\033[0m")
+        i += 1
+        if i > 36:
+            i = 31
+
+    print("--- https://github.com/sys-nyx/dirpy - License: GNU 3.0 - Have fun and please don't use for anyhthing illegal :P ---\n")
 
 def print_results(response, dirpy):
     """
@@ -390,9 +398,13 @@ async def main():
     parser.add_argument("-D", "--data", type=str, help="Add custom data to each body.")
     parser.add_argument("-X", "--method", default="GET", type=str, help="Request method to use {GET, POST, HEAD, PUT, DELETE, OPTIONS}")
     parser.add_argument("-ua", "--user-agent", type=str, help="Specify a custom user agent to use.")
-    parser.add_argument("-sp", "--session-proxies", type=str, help="Path a text file containing a list of proxies to use(One per generated session)")
+    parser.add_argument("-sp", "--session-proxies", type=str, help="Path a text file containing a list of proxies to use (One per generated session).")
+    parser.add_argument("--quiet", help="Do not print messages to terminal.")
+    parser.add_argument("--no-intro", default=False, action="store_true", help="Do not show the intro message at startup.")
     args = parser.parse_args()
-    show_logo()
+    if not args.no_intro:
+        show_logo()
+
     dirpy = Dirpy(args)
 
     await dirpy.run()
