@@ -329,15 +329,14 @@ class Dirpy:
 
     async def session_handler(self, target: object, proxy: str):
         """
-        Create a session, which iwll in turn spawn worker process. Each worker process utilizes 
-        session attriubutes, such as user-agents, that are created within this function.
+        Create a session, which iwll in turn spawn worker processes. Each worker process utilizes 
+        session attributes, such as user-agents, that are created within this function.
 
         Args:
             target:     Target object containing a valid url or ip address.
 
             proxy:      Set a proxy as the sessions default.
         """
-        print('123')
         data = {}
         headers = {}
         if self.args.data:
@@ -360,19 +359,27 @@ class Dirpy:
             await asyncio.gather(*tasks)
 
     async def request_worker(self, target, session):
+        """
+        Loop that pulls payloads from self.payload_queue, makes the request, and then processes it 
+        utilizing the event handler.
+
+        Args:
+            session:    Aiohttp session object.
+            target:     valid Target object.
+        """
         err = False
         while self.payload_queue.qsize() > 0:
             while not target.ready():
                 await asyncio.sleep(target.wait_time / self.args.workers)
 
             try:
-                if target.wait_time > 0 or target.wait_time == 0:
+                if target.wait_time >= 0:
                     async with target.lock:
                         target.reset_timer()
                         await self.event_handler.call_events('on_target_acquired', target, self)
                         target.req_count += 1
-                        if target.req_count % 100 == 0:
-                            print(target.req_count)
+                        # if target.req_count % 100 == 0:
+                        #     print(target.req_count)
 
                 payload = await self.payload_queue.get()
                 payload = PayloadMutators().mutate_all(payload, self.args.mutate)
@@ -415,6 +422,7 @@ def comma_int_to_set(comma_sep_int: str) -> set[int]:
     if comma_sep_int:
         return set([int(i) for i in comma_sep_int.split(',')])
     return None
+
 def comma_str_to_set(comma_sep_str: str) -> set[str]:
     print(comma_sep_str)
     return set([s for s in comma_sep_str.split(',') if type(i) == str])
@@ -441,7 +449,8 @@ async def main():
     parser.add_argument("--no-intro", default=False, action="store_true", help="Do not show the intro message at startup.")
     parser.add_argument("-mc", "--match-code", type=comma_int_to_set, default='200,301,302,403,401', help="Comma seperated list of status codes to use as a white list I.e.'200,301,302,403,404'")
     parser.add_argument("-ic", "--ignore-code", type=comma_int_to_set, default='', help="Comma seperated list of status codes to use as a black list instead of a status code white list. I.e '403,401,403,404'")
-
+    parser.add_argument("-ml", "--match-length", type=comma_int_to_set, default='', help='Include results by lengths.')
+    parser.add_argument("-il", "--ignore-length", type=comma_int_to_set, default='', help='Filter results by lengths.')
     args = parser.parse_args()
 
 
