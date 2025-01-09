@@ -15,16 +15,15 @@ from urllib.parse import urlparse, quote, unquote
 
 def show_logo():
     logo=r"""
-                                                .=-.-.               _ __                                                     
-        =========================== _,..---._  /==/_ /.-.,.---.   .-`.' ,`.  ,--.-.  .-,--. =================================
+                                               .=-.-.               _ __                                                     
+                                   _,..---._  /==/_ /.-.,.---.   .-`.' ,`.  ,--.-.  .-,--.                                  
        ========================== /==/,   -  \|==|, |/==/  `   \ /==/, -   \/==/- / /=/_ / =================================
       =========================== |==|   _   _\==|  |==|-, .=., |==| _ .=. |\==\, \/=/. / =================================
      ============================ |==|  .=.   |==|- |==|   '='  /==| , '=',| \==\  \/ -/ =================================
     ============================= |==|,|   | -|==| ,|==|- ,   .'|==|-  '..'   |==|  ,_/ =================================
    ============================== |==|  '='   /==|- |==|_  . ,'.|==|,  |      \==\-, / =================================
   =============================== |==|-,   _`//==/. /==/  /\ ,  )==/ - |      /==/._/ =================================
- ================================ `-.`.____.' `--`-``--`-`--`--'`--`---'      `--`-` =================================
- 
+                                  `-.`.____.' `--`-``--`-`--`--'`--`---'      `--`-`                                  
 """
     i = 31
     for c in logo:
@@ -34,7 +33,7 @@ def show_logo():
         if i > 36:
             i = 31
 
-    print("--- https://github.com/sys-nyx/dirpy - License: GNU 3.0 - Have fun and please don't use for anyhthing illegal :P ---\n")
+    print(" --- https://github.com/sys-nyx/dirpy - License: GNU 3.0 - Have fun and please don't use for anyhthing illegal :P ---\n")
 
 def print_results(response, dirpy):
     """
@@ -122,13 +121,15 @@ class EventHandler(object):
 
     """
     events = {
+        'scan_init': [],
         'before_request': [],
+        'on_target_acquired': [],
         'mutate_paload': [],
         'on_response': [],
         'on_success': [],
         'on_failure': [],
         'on_timeout': [],
-        'on_err': [],
+        'on_err': []
     }
 
     class event:
@@ -266,13 +267,37 @@ class Target:
             return False
         return True
 
+
 class Dirpy:
-    def __init__(self,args):
+    def __init__(self, args):
         self. args = args
         self.sem = asyncio.Semaphore(args.workers)
         self.payload_queue = asyncio.Queue()
         self.sessions = []
         self.event_handler = EventHandler()
+        self.scanner = self.get_scanner(self.args.scan_type)
+        self.match_status = set()
+        self.ignore_status = set()
+
+    def init_dirb(self):
+        self.event_handler.add('on_success', print_results)
+        any(map(self.payload_queue.put_nowait, self.load_list(self.args.wordlist)))
+
+
+    def get_scanner(self, scan_name:str) -> object:
+        scanners = {
+            # 'fuzz': init_fuzzer,
+            'dir': self.init_dirb,
+            # 'crawl': init_crawler,
+            # 'vhost': init_vhost,
+            # 'sub': init_dns,
+            # 'websock': init_websock,
+            # 'socket': init_sock
+        }
+
+        if scan_name in scanners:
+            return scanners[scan_name]()
+
     def load_list(self, path:str) -> list[str]:
         if not os.path.exists(path):
             print("File path does not exist. Exiting...")
@@ -281,15 +306,11 @@ class Dirpy:
             return [l.strip() for l in f.readlines() if not l.startswith('#')]
 
     async def run(self):
-        loop = asyncio.get_event_loop()
+
         target = Target(self.args)
         proxy = None
-        proxies = None
-        any(map(self.payload_queue.put_nowait, self.load_list(self.args.wordlist)))
-        
+        proxies = None        
         tasks = []
-
-        self.event_handler.add('on_response', print_results)
 
         if self.args.session_proxies:
             proxies = load_list(self.args.session_proxies)
@@ -298,51 +319,12 @@ class Dirpy:
         for w in range(self.args.sessions):
             if proxies:
                 proxy = proxies[w]
-    
+
             task = asyncio.create_task(self.session_handler(target, proxy))
 
             tasks.append(task)
 
         await asyncio.gather(*tasks)
-
-    async def request_worker(self, target, session):
-        err = False
-        while self.payload_queue.qsize() > 0:
-            while not target.ready():
-                await asyncio.sleep(target.wait_time / self.args.workers)
-            
-            try:
-                if target.wait_time > 0 or target.wait_time == 0:
-                    async with target.lock:
-                        target.reset_timer()
-                        target.req_count += 1
-                        if target.req_count % 100 == 0:
-                            print(target.req_count)
-                payload = await self.payload_queue.get()
-                payload = PayloadMutators().mutate_all(payload, self.args.mutate)
-        
-                url = os.path.join(target.address, payload)
-                await self.event_handler.call_events('before_request', payload)
-                async with session.request(self.args.method, url) as response:
-                    await self.event_handler.call_events('on_response', response, self)
-                    if response.status == 200:
-                        await self.event_handler.call_events('on_success', response, self)
-                    else:
-                        await self.event_handler.call_events('on_failure', response, self)
-
-            except aiohttp.client_exceptions.ServerDisconnectedError as e:
-                print(e)
-                err = True
-            except aiohttp.client_exceptions.ClientConnectorError as e:
-                print(e)
-                err = True
-            except ValueError as e:
-                print(e)
-                err = True
-            finally:
-                if err:
-                    await self.event_handler.call_events('on_err', response)
-                self.payload_queue.task_done()
 
 
     async def session_handler(self, target: object, proxy: str):
@@ -355,6 +337,7 @@ class Dirpy:
 
             proxy:      Set a proxy as the sessions default.
         """
+        print('123')
         data = {}
         headers = {}
         if self.args.data:
@@ -376,10 +359,65 @@ class Dirpy:
 
             await asyncio.gather(*tasks)
 
+    async def request_worker(self, target, session):
+        err = False
+        while self.payload_queue.qsize() > 0:
+            while not target.ready():
+                await asyncio.sleep(target.wait_time / self.args.workers)
+
+            try:
+                if target.wait_time > 0 or target.wait_time == 0:
+                    async with target.lock:
+                        target.reset_timer()
+                        await self.event_handler.call_events('on_target_acquired', target, self)
+                        target.req_count += 1
+                        if target.req_count % 100 == 0:
+                            print(target.req_count)
+
+                payload = await self.payload_queue.get()
+                payload = PayloadMutators().mutate_all(payload, self.args.mutate)
+                url = os.path.join(target.address, payload)
+
+                await self.event_handler.call_events('before_request', payload)
+
+                async with session.request(self.args.method, url) as response:
+                    await self.event_handler.call_events('on_response', response, self)
+
+                    if response.status in self.args.match_code:
+                        await self.event_handler.call_events('on_success', response, self)
+
+                    else:
+                        await self.event_handler.call_events('on_failure', response, self)
+
+            except aiohttp.client_exceptions.ServerDisconnectedError as e:
+                print(e)
+                err = True
+            except aiohttp.client_exceptions.ClientConnectorError as e:
+                print(e)
+                err = True
+            except ValueError as e:
+                print(e)
+                err = True
+            finally:
+                if err:
+                    await self.event_handler.call_events('on_err', response)
+                self.payload_queue.task_done()
+
+
+
 def get_args_data(args_str: str) -> dict:
     return
+
 def get_args_headers(args_str: str) -> dict:
     return
+
+def comma_int_to_set(comma_sep_int: str) -> set[int]:
+    if comma_sep_int:
+        return set([int(i) for i in comma_sep_int.split(',')])
+    return None
+def comma_str_to_set(comma_sep_str: str) -> set[str]:
+    print(comma_sep_str)
+    return set([s for s in comma_sep_str.split(',') if type(i) == str])
 
 async def main():
     parser = argparse.ArgumentParser()
@@ -401,12 +439,18 @@ async def main():
     parser.add_argument("-sp", "--session-proxies", type=str, help="Path a text file containing a list of proxies to use (One per generated session).")
     parser.add_argument("--quiet", help="Do not print messages to terminal.")
     parser.add_argument("--no-intro", default=False, action="store_true", help="Do not show the intro message at startup.")
+    parser.add_argument("-mc", "--match-code", type=comma_int_to_set, default='200,301,302,403,401', help="Comma seperated list of status codes to use as a white list I.e.'200,301,302,403,404'")
+    parser.add_argument("-ic", "--ignore-code", type=comma_int_to_set, default='', help="Comma seperated list of status codes to use as a black list instead of a status code white list. I.e '403,401,403,404'")
+
     args = parser.parse_args()
+
+
+
     if not args.no_intro:
         show_logo()
 
     dirpy = Dirpy(args)
-
+    print(dirpy.args.match_code)
     await dirpy.run()
 
 if __name__=="__main__":    
